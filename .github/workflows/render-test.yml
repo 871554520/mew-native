@@ -1,0 +1,25 @@
+name: Render test (linux)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: 装 zlib
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zlib1g-dev
+      - name: 编译软光栅
+        run: |
+          g++ -std=c++17 -O2 -Isrc/core -Isrc/render               src/core/swf.cpp src/render/softrender.cpp tests/render_main.cpp -lz -o /tmp/render
+          /tmp/render samples/font.swf 0 /tmp/out.png 1.0
+          ls -l /tmp/out.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: render-out
+          path: /tmp/out.png
+          if-no-files-found: error
