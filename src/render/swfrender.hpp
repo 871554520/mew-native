@@ -7,7 +7,7 @@
 
 namespace mewrender {
 
-struct DisplayItem { int depth; int characterId; swf::Matrix matrix; };
+struct DisplayItem { int depth; int characterId; swf::Matrix matrix; int clipDepth=0; bool hasClip=false; };
 
 // 计算某帧的显示列表（从第 0 帧累加到 frameIndex）
 std::vector<DisplayItem> buildDisplayList(const swf::Movie& mv, int frameIndex);
