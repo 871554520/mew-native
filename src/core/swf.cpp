@@ -40,6 +40,7 @@ struct BitReader {
         return (int32_t)v;
     }
     void align() { bit = (bit + 7) & ~size_t(7); }
+    bool ok() const { return (bit >> 3) < n; }
 };
 
 Rect readRect(BitReader& br) {
