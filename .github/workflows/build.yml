@@ -16,24 +16,25 @@ jobs:
         run: |
           cmake --version
           xcodebuild -version
-          clang --version | head -2
 
       - name: 配置与编译
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build --parallel
 
-      - name: 校验架构与依赖
+      - name: SWF 解析自检（--scan）
         run: |
           BIN=build/MewgenicsNative.app/Contents/MacOS/MewgenicsNative
           file "$BIN"
           lipo -info "$BIN"
           otool -L "$BIN"
-          codesign --force --deep --sign - build/MewgenicsNative.app
-          codesign -dv build/MewgenicsNative.app 2>&1 | head -5
+          echo "--- scan ---"
+          "$BIN" --scan samples/font.swf
 
-      - name: 打包
+      - name: 签名与打包
         run: |
+          codesign --force --deep --sign - build/MewgenicsNative.app
+          codesign -dv build/MewgenicsNative.app 2>&1 | head -3
           ditto -c -k --sequesterRsrc --keepParent build/MewgenicsNative.app MewgenicsNative-mac.zip
           ls -l MewgenicsNative-mac.zip
 
