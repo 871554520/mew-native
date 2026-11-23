@@ -3,11 +3,28 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <functional>
 #include "gpak.hpp"
 #include "swf.hpp"
 #include "swfrender.hpp"
+#include "avm1.hpp"
 
 static NSString* S(const std::string& s) { return [NSString stringWithUTF8String:s.c_str()] ?: @"?"; }
+
+class ViewportTimeline : public avm1::Timeline {
+public:
+    __weak NSObject* owner = nil;
+    int frame = 0;
+    bool playing = false;
+    int count = 0;
+    std::function<void(int)> onGoto;
+    std::function<void(bool)> onPlay;
+    void gotoFrame(int f) override { frame = f < 0 ? 0 : (count && f >= count ? count - 1 : f); if (onGoto) onGoto(frame); }
+    void play() override { playing = true; if (onPlay) onPlay(true); }
+    void stop() override { playing = false; if (onPlay) onPlay(false); }
+    int currentFrame() override { return frame; }
+    int frameCount() override { return count; }
+};
 
 @interface Viewer : NSObject <NSApplicationDelegate>
 @property (strong) NSWindow* win;
@@ -23,6 +40,10 @@ static NSString* S(const std::string& s) { return [NSString stringWithUTF8String
     std::vector<std::string> _swfNames;
     swf::Movie _movie;
     int _frame;
+    avm1::VM _vm;
+    ViewportTimeline* _tl;
+    NSTimer* _timer;
+    BOOL _playing;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)n {
@@ -59,6 +80,7 @@ static NSString* S(const std::string& s) { return [NSString stringWithUTF8String
     [self loadPack];
     [self.win makeKeyAndOrderFront:nil];
     [NSApp activateIgnoringOtherApps:YES];
+    _timer = [NSTimer scheduledTimerWithTimeInterval:1.0/24.0 target:self selector:@selector(tick:) userInfo:nil repeats:YES];
 }
 
 - (void)loadPack {
@@ -84,6 +106,28 @@ static NSString* S(const std::string& s) { return [NSString stringWithUTF8String
     if (!_swfNames.empty()) [self loadSwf:_swfNames[0]];
 }
 
+- (void)runActionsForFrame:(int)f {
+    if (f >= 0 && f < (int)_movie.frames.size()) {
+        const auto& code = _movie.frames[f].actions;
+        if (!code.empty()) {
+            _vm.setTimeline(_tl);
+            _vm.run(code);
+            for (auto& t : _vm.traces) NSLog(@"[trace] %s", t.c_str());
+            _frame = _tl->currentFrame();
+        }
+    }
+}
+
+- (void)tick:(NSTimer*)t {
+    if (!_playing) return;
+    int next = _frame + 1;
+    if (next >= (int)_movie.frames.size()) next = 0;
+    _frame = next;
+    [self.slider setDoubleValue:_frame];
+    [self runActionsForFrame:_frame];
+    [self render];
+}
+
 - (void)loadSwf:(const std::string&)name {
     const mew::GpakEntry* e = _pack.find(name);
     if (!e) return;
@@ -95,6 +139,24 @@ static NSString* S(const std::string& s) { return [NSString stringWithUTF8String
         return;
     }
     _frame = 0;
+    if (!_tl) {
+        _tl = new ViewportTimeline();
+        __weak Viewer* weakSelf = self;
+        _tl->onGoto = [weakSelf](int f) {
+            Viewer* s = weakSelf; if (!s) return;
+            s->_frame = f; [s.slider setDoubleValue:f]; [s render];
+        };
+        _tl->onPlay = [weakSelf](bool p) {
+            Viewer* s = weakSelf; if (!s) return;
+            s->_playing = p;
+        };
+    }
+    _tl->count = (int)_movie.frames.size();
+    _tl->frame = 0;
+    _playing = YES;
+    _vm = avm1::VM();
+    _vm.setTimeline(_tl);
+    for (auto& a : _movie.initActions) _vm.run(a);
     [self.slider setMaxValue:std::max(1, (int)_movie.frames.size() - 1)];
     [self.slider setDoubleValue:0];
     [self render];
@@ -110,6 +172,7 @@ static NSString* S(const std::string& s) { return [NSString stringWithUTF8String
 }
 
 - (void)render {
+    if (_frame < 0) _frame = 0;
     CGImageRef img = mewrender::renderFrame(_movie, _frame, 1.0);
     if (!img) return;
     [self.view setImage:[[NSImage alloc] initWithCGImage:img size:NSZeroSize]];
@@ -123,6 +186,8 @@ static NSString* S(const std::string& s) { return [NSString stringWithUTF8String
 }
 - (void)frameChanged:(id)sender {
     _frame = (int)[self.slider doubleValue];
+    if (_tl) { _tl->frame = _frame; }
+    [self runActionsForFrame:_frame];
     [self render];
 }
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)a { return YES; }
