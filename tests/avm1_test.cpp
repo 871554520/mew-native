@@ -116,7 +116,7 @@ int main() {
         pushStr(code, "onRelease");
         pushStr(code, "cb"); code.push_back(0x1C);               // 取函数值
         code.push_back(0x4F);                                    // SetMember
-        code.push_back(0x17);                                    // 弹出 SetMember 的结果？SetMember 不压栈
+        code.push_back(0x17);                                    // 弹出 SetMember 压回的值
         // obj.onRelease()  -> CallMethod(obj, "onRelease", 0)
         pushStr(code, "obj"); code.push_back(0x1C);
         pushStr(code, "onRelease");
@@ -124,6 +124,8 @@ int main() {
         avm1::VM vm;
         bool ok = vm.run(code); lastErr = vm.lastError();
         check("SetMember + CallMethod", ok && !vm.traces.empty() && vm.traces.back() == "clicked");
+        printf("  debug traces=%zu back=%s err=%s\n", vm.traces.size(),
+               vm.traces.empty() ? "-" : vm.traces.back().c_str(), vm.lastError().c_str());
     }
 
     printf(fails == 0 ? "ALL PASS\n" : "FAILURES %d\n", fails);
