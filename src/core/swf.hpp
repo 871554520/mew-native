@@ -48,6 +48,7 @@ struct Placement {
 struct Frame {
     std::vector<Placement> ops;       // 按出现顺序的显示列表操作
     std::string label;
+    std::vector<uint8_t> actions;     // DoAction 字节码（AVM1）
 };
 
 struct Sprite;
@@ -64,6 +65,7 @@ struct Movie {
     std::map<int,Shape> shapes;
     std::map<int,Sprite> sprites;
     std::vector<Frame> frames;
+    std::vector<std::vector<uint8_t>> initActions;   // DoInitAction（按定义顺序）
     std::map<std::string,int> tagHistogram;
     std::string error;
     bool loaded=false;
