@@ -109,9 +109,11 @@ int main() {
         u16(code, 0);
         u16(code, (int)fnBody.size()); code.insert(code.end(), fnBody.begin(), fnBody.end());
         code.push_back(0x17);
-        // obj = new Object(); obj.onRelease = cb;
+        // obj = new Object();  ← AVM1 的 SetVariable 先弹 value 再弹 name，所以先压名字
+        pushStr(code, "obj");
         pushStr(code, "Object"); code.push_back(0x40); u16(code, 0);
-        pushStr(code, "obj"); code.push_back(0x1D);              // 简化为全局 obj
+        code.push_back(0x1D);
+        code.push_back(0x17);                                    // 弹掉压回的 obj
         pushStr(code, "obj"); code.push_back(0x1C);              // 取 obj
         pushStr(code, "onRelease");
         pushStr(code, "cb"); code.push_back(0x1C);               // 取函数值
