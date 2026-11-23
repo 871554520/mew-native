@@ -8,17 +8,24 @@
 
 namespace avm1 {
 
+struct Value;
+struct Object {
+    std::map<std::string, Value> props;
+};
+
 struct Value {
-    enum Type { Undefined, Null, Number, String, Bool, Function } type = Undefined;
+    enum Type { Undefined, Null, Number, String, Bool, Function, Object_ } type = Undefined;
     double num = 0;
     std::string str;
     struct Func;
     std::shared_ptr<Func> fn;
+    std::shared_ptr<Object> obj;
 
     static Value number(double v) { Value x; x.type = Number; x.num = v; return x; }
     static Value string(const std::string& s) { Value x; x.type = String; x.str = s; return x; }
     static Value boolean(bool b) { Value x; x.type = Bool; x.num = b ? 1 : 0; return x; }
     static Value null() { Value x; x.type = Null; return x; }
+    static Value object() { Value x; x.type = Object_; x.obj = std::make_shared<Object>(); return x; }
     static Value undefined() { return Value(); }
 
     double toNumber() const;
@@ -50,6 +57,7 @@ public:
 
 private:
     bool exec(const uint8_t* code, size_t n, int depth);
+    Value callFunction(const Value& target, const std::vector<Value>& argv, int depth);
     Value pop();
     void push(const Value& v);
 
