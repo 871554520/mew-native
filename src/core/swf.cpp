@@ -365,6 +365,39 @@ bool parseMemory(const std::vector<uint8_t>& raw, Movie& mv, std::string* errp) 
             (void)sframeCount;
             mv.sprites[sp.id] = sp;
         }
+        else if (code == 34 && len >= 4) {   // DefineButton2
+            Button btn;
+            btn.id = rd.d[start] | (rd.d[start+1]<<8);
+            size_t p = start + 3;            // 跳过 flags(u8)
+            size_t endB = start + len;
+            if (p < endB && rd.d[p] == 0) { /* trackAsMenu 偏移的 actionOffset */ }
+            // 角色记录
+            while (p + 2 <= endB) {
+                uint8_t flags = rd.d[p];
+                if (flags == 0) { p++; break; }
+                ButtonRecord br;
+                br.stateFlags = flags;
+                br.characterId = rd.d[p+1] | (rd.d[p+2]<<8);
+                br.depth = rd.d[p+3] | (rd.d[p+4]<<8);
+                Reader mr(rd.d + p + 5, endB - (p + 5));
+                BitReader mbr(mr.d, mr.n);
+                br.matrix = readMatrix(mbr);
+                p += 5 + (mbr.bit + 7) / 8;
+                btn.records.push_back(br);
+            }
+            // 动作记录：u16 长度 + 条件 + 代码
+            while (p + 2 <= endB) {
+                uint16_t alen = rd.d[p] | (rd.d[p+1]<<8);
+                if (alen == 0) break;
+                if (p + 2 + alen > endB) break;
+                ButtonAction ba;
+                ba.conditions = rd.d[p+2] | (rd.d[p+3]<<8);
+                ba.code.assign(rd.d + p + 4, rd.d + p + 2 + alen);
+                btn.actions.push_back(ba);
+                p += 2 + alen;
+            }
+            mv.buttons[btn.id] = btn;
+        }
         else if (code == 12 && len > 0) {
             if (curFrame < (int)mv.frames.size())
                 mv.frames[curFrame].actions.assign(rd.d + start, rd.d + start + len);
@@ -383,6 +416,35 @@ bool parseMemory(const std::vector<uint8_t>& raw, Movie& mv, std::string* errp) 
     mv.frames.pop_back();
     mv.loaded = true;
     return true;
+}
+
+static bool inside(const Rect& r, double x, double y) {
+    double x0 = r.x0, x1 = r.x1, y0 = r.y0, y1 = r.y1;
+    if (x0 > x1) { double t = x0; x0 = x1; x1 = t; }
+    if (y0 > y1) { double t = y0; y0 = y1; y1 = t; }
+    return x >= x0 && x <= x1 && y >= y0 && y <= y1;
+}
+
+bool hitTestButton(const Movie& mv, const Button& btn, double px, double py,
+                   double pa, double pb, double pc2, double pd, double ptx, double pty) {
+    // 逆变换：屏幕点 -> 记录本地坐标
+    double det = pa * pd - pb * pc2;
+    if (det > -1e-9 && det < 1e-9) return false;
+    double dx = px - ptx, dy = py - pty;
+    double lx = (pd * dx - pb * dy) / det;
+    double ly = (-pc2 * dx + pa * dy) / det;
+    for (const auto& rec : btn.records) {
+        auto it = mv.shapes.find(rec.characterId);
+        if (it == mv.shapes.end()) continue;
+        // 记录矩阵逆变换
+        double rd2 = rec.matrix.a * rec.matrix.d - rec.matrix.b * rec.matrix.c;
+        if (rd2 > -1e-9 && rd2 < 1e-9) continue;
+        double rx = lx - rec.matrix.tx, ry = ly - rec.matrix.ty;
+        double sx = (rec.matrix.d * rx - rec.matrix.b * ry) / rd2;
+        double sy = (-rec.matrix.c * rx + rec.matrix.a * ry) / rd2;
+        if (inside(it->second.bounds, sx, sy)) return true;
+    }
+    return false;
 }
 
 bool parse(const std::string& path, Movie& mv, std::string* errp) {
