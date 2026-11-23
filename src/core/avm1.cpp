@@ -98,6 +98,8 @@ bool VM::exec(const uint8_t* c, size_t n, int depth) {
             case 0x0E: { Value a = pop(), b = pop(); push(Value::number(std::fmod(b.toNumber(), a.toNumber()))); break; }
             case 0x21: { Value a = pop(), b = pop(); push(Value::string(b.toString() + a.toString())); break; } // StringAdd
             case 0x13: { Value a = pop(), b = pop(); push(Value::boolean(b.toString() == a.toString())); break; }
+            case 0x47: { Value a = pop(), b = pop(); push(Value::boolean(b.toNumber() > a.toNumber())); break; } // Greater
+            case 0x48: { Value a = pop(), b = pop(); push(Value::boolean(b.toNumber() < a.toNumber())); break; } // Less
             case 0x2A: { Value a = pop(), b = pop(); push(Value::boolean(b.toString() < a.toString())); break; }
             case 0x14: { Value a = pop(); push(Value::number((double)a.toString().size())); break; } // StringLength
             case 0x15: { // StringExtract
@@ -127,18 +129,18 @@ bool VM::exec(const uint8_t* c, size_t n, int depth) {
                 break;
             }
             case 0x9A: { Value target = pop(), url = pop(); (void)target; (void)url; break; } // GetURL
-            case 0x9B: { // DefineFunction
-                Value nameV = pop();
+            case 0x9B: { // DefineFunction（名字与参数是 NUL 结尾的 STRING）
+                auto readStr = [&](void) -> std::string {
+                    std::string out;
+                    while (pc < n && c[pc] != 0) out.push_back((char)c[pc++]);
+                    if (pc < n) pc++;
+                    return out;
+                };
+                auto fn = std::make_shared<Value::Func>();
+                fn->name = readStr();
                 if (pc + 2 > n) return false;
                 int nparams = rd16(c + pc); pc += 2;
-                auto fn = std::make_shared<Value::Func>();
-                fn->name = nameV.toString();
-                for (int i = 0; i < nparams; ++i) {
-                    if (pc >= n) return false;
-                    uint8_t len = c[pc++];
-                    fn->params.push_back(std::string((const char*)c + pc, len));
-                    pc += len;
-                }
+                for (int i = 0; i < nparams; ++i) fn->params.push_back(readStr());
                 if (pc + 2 > n) return false;
                 int codelen = rd16(c + pc); pc += 2;
                 if (pc + codelen > n) return false;
