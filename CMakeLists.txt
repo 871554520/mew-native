@@ -7,7 +7,7 @@ set(CMAKE_OSX_ARCHITECTURES "arm64")
 set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0")
 
 # L0 纯逻辑层：gpak 容器解析，零平台依赖
-add_library(mew_core STATIC src/core/gpak.cpp src/core/swf.cpp)
+add_library(mew_core STATIC src/core/gpak.cpp src/core/swf.cpp src/core/avm1.cpp)
 target_link_libraries(mew_core PUBLIC z)
 target_include_directories(mew_core PUBLIC src/core src/shim src/render)
 
