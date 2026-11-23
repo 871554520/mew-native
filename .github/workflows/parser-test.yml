@@ -15,7 +15,7 @@ jobs:
       - name: 装 zlib
         run: sudo apt-get update -qq && sudo apt-get install -y -qq zlib1g-dev
 
-      - name: 编译并扫描
+      - name: SWF 解析自检
         run: |
           cat > /tmp/scanmain.cpp <<'CPP'
           #include "swf.hpp"
@@ -42,3 +42,8 @@ jobs:
           CPP
           g++ -std=c++17 -O2 -Isrc/core -Isrc/shim src/core/swf.cpp src/core/gpak.cpp /tmp/scanmain.cpp -lz -o /tmp/scan
           /tmp/scan samples/font.swf
+
+      - name: AVM1 自检
+        run: |
+          g++ -std=c++17 -O2 -Isrc/core src/core/avm1.cpp tests/avm1_test.cpp -o /tmp/avm1_test
+          /tmp/avm1_test
