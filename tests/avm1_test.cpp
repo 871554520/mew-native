@@ -24,8 +24,10 @@ struct FakeTimeline : avm1::Timeline {
 
 int main() {
     int fails = 0;
+    std::string lastErr;
     auto check = [&](const char* what, bool ok) {
-        printf("%s %s\n", ok ? "PASS" : "FAIL", what);
+        printf("%s %s%s%s\n", ok ? "PASS" : "FAIL", what,
+               (!ok && !lastErr.empty()) ? "  <- " : "", (!ok && !lastErr.empty()) ? lastErr.c_str() : "");
         if (!ok) fails++;
     };
 
@@ -34,7 +36,7 @@ int main() {
         pushStr(code, "hello "); pushStr(code, "avm1"); code.push_back(0x21); trace(code);
         pushInt(code, 7); pushInt(code, 5); code.push_back(0x0C); trace(code);
         avm1::VM vm;
-        bool ok = vm.run(code);
+        bool ok = vm.run(code); lastErr = vm.lastError();
         check("字符串拼接", ok && vm.traces.size() == 2 && vm.traces[0] == "hello avm1");
         check("乘法 7*5=35", ok && vm.traces.size() == 2 && vm.traces[1] == "35");
     }
@@ -46,7 +48,7 @@ int main() {
         // loop:
         size_t loopStart = code.size();
         pushStr(code, "i"); code.push_back(0x1C);           // get i
-        pushInt(code, 3); code.push_back(0x48);             // i < 3
+        pushInt(code, 2); code.push_back(0x47);             // i > 2
         code.push_back(0x9D); u16(code, 0);                 // If -> 跳出
         size_t jumpPos = code.size() - 2;
         // i = i + 1
@@ -62,7 +64,7 @@ int main() {
         pushStr(code, "i"); code.push_back(0x1C); trace(code);
 
         avm1::VM vm;
-        bool ok = vm.run(code);
+        bool ok = vm.run(code); lastErr = vm.lastError();
         check("循环 i=3", ok && !vm.traces.empty() && vm.traces.back() == "3");
     }
 
@@ -73,7 +75,7 @@ int main() {
         code.push_back(0x81); u16(code, 4);   // GotoFrame 4
         code.push_back(0x07);                  // Stop
         avm1::VM vm; vm.setTimeline(&tl);
-        bool ok = vm.run(code);
+        bool ok = vm.run(code); lastErr = vm.lastError();
         check("GotoFrame+Stop", ok && tl.frame == 4 && !tl.playing);
     }
 
@@ -89,7 +91,9 @@ int main() {
         code.push_back(0x17);                        // 弹出函数值
         pushStr(code, "dbl"); u16(code, 0); code.push_back(0x3D); // CallFunction "dbl"
         avm1::VM vm; vm.setGlobal("x", avm1::Value::number(21));
-        bool ok = vm.run(code);
+        bool ok = vm.run(code); lastErr = vm.lastError();
+        printf("  globals.dbl=%s traces=%zu\n",
+               vm.globals().count("dbl") ? "yes" : "no", vm.traces.size());
         check("DefineFunction/Call", ok);
     }
 
