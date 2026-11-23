@@ -82,6 +82,7 @@ int main() {
     {   // 函数定义与调用
         Bytes body;
         pushStr(body, "x"); body.push_back(0x1C); pushInt(body, 2); body.push_back(0x0C); // x*2
+        body.push_back(0x26);   // trace 结果
         Bytes code;
         code.push_back(0x9B);
         for (char ch : std::string("dbl")) code.push_back((uint8_t)ch);
@@ -89,12 +90,12 @@ int main() {
         u16(code, 0);                                // 0 个参数
         u16(code, (int)body.size()); code.insert(code.end(), body.begin(), body.end());
         code.push_back(0x17);                        // 弹出函数值
-        pushStr(code, "dbl"); u16(code, 0); code.push_back(0x3D); // CallFunction "dbl"
+        pushStr(code, "dbl"); code.push_back(0x3D); u16(code, 0); // CallFunction "dbl"（参数个数在指令之后）
         avm1::VM vm; vm.setGlobal("x", avm1::Value::number(21));
         bool ok = vm.run(code); lastErr = vm.lastError();
         printf("  globals.dbl=%s traces=%zu\n",
                vm.globals().count("dbl") ? "yes" : "no", vm.traces.size());
-        check("DefineFunction/Call", ok);
+        check("DefineFunction/Call -> 42", ok && !vm.traces.empty() && vm.traces.back() == "42");
     }
 
     printf(fails == 0 ? "ALL PASS\n" : "FAILURES %d\n", fails);
