@@ -18,11 +18,14 @@ struct Bitmap {
     std::vector<uint8_t> alpha;       // DefineBitsJPEG3 的 alpha 通道
 };
 
+struct GradientStop { uint8_t r=0,g=0,b=0,a=255; uint8_t ratio=0; };
+
 struct FillStyle {
-    enum Kind { Solid=0, Bitmap=1 } kind=Solid;
+    enum Kind { Solid=0, Bitmap=1, LinearGradient=2, RadialGradient=3 } kind=Solid;
     uint8_t r=0,g=0,b=0,a=255;
     int bitmapId=0;
     Matrix matrix;
+    std::vector<GradientStop> stops;
 };
 
 struct ShapePath {
@@ -46,6 +49,8 @@ struct Frame {
     std::vector<Placement> ops;       // 按出现顺序的显示列表操作
     std::string label;
 };
+
+struct Sprite;
 
 struct Sprite { int id=0; std::vector<Frame> frames; };
 
