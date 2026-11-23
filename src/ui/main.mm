@@ -69,6 +69,7 @@ public:
     [c addSubview:self.frameLabel];
 
     self.view = [[NSImageView alloc] initWithFrame:NSMakeRect(20, 150, 1040, 500)];
+    self.view.editable = NO;
     [self.view setImageScaling:NSImageScaleProportionallyUpOrDown];
     [c addSubview:self.view];
 
@@ -166,8 +167,8 @@ public:
         _movie.frames.size(), _movie.frameRate, _movie.frameCount, _movie.backgroundColor];
     size_t sprites = _movie.sprites.size(), clip = 0;
     for (auto& f : _movie.frames) for (auto& op : f.ops) if (op.hasClip) clip++;
-    [s appendFormat:@"形状 %zu  位图 %zu  精灵 %zu  遮罩 %zu  tag 种类 %zu\n",
-        _movie.shapes.size(), _movie.bitmaps.size(), sprites, clip, _movie.tagHistogram.size()];
+    [s appendFormat:@"形状 %zu  位图 %zu  精灵 %zu  按钮 %zu  遮罩 %zu  tag 种类 %zu\n",
+        _movie.shapes.size(), _movie.bitmaps.size(), sprites, _movie.buttons.size(), clip, _movie.tagHistogram.size()];
     [self.info setStringValue:s];
 }
 
@@ -190,6 +191,48 @@ public:
     [self runActionsForFrame:_frame];
     [self render];
 }
+- (void)mouseDown:(NSEvent*)ev {
+    // 视图 -> SWF 坐标（twips，y 向下）
+    NSPoint p = [self.view convertPoint:[ev locationInWindow] fromView:nil];
+    NSRect b = self.view.bounds;
+    double w = _movie.frameSize.x1 - _movie.frameSize.x0;
+    double h = _movie.frameSize.y1 - _movie.frameSize.y0;
+    if (w <= 0 || h <= 0) return;
+    double nx = p.x / b.size.width;
+    double ny = 1.0 - (p.y / b.size.height);
+    double mx = _movie.frameSize.x0 + nx * w;
+    double my = _movie.frameSize.y0 + ny * h;
+
+    bool fired = false;
+    for (const auto& item : mewrender::buildDisplayList(_movie, _frame)) {
+        auto bit = _movie.buttons.find(item.characterId);
+        if (bit == _movie.buttons.end()) continue;
+        const swf::Button& btn = bit->second;
+        if (!swf::hitTestButton(_movie, btn, mx, my,
+                                item.matrix.a, item.matrix.b, item.matrix.c, item.matrix.d,
+                                item.matrix.tx, item.matrix.ty)) continue;
+        for (const auto& act : btn.actions) {
+            uint16_t cond = act.conditions;
+            bool take = false;
+            for (int bits = 0; bits < 4; ++bits) {
+                int state = (cond >> (bits * 2)) & 3;
+                if (state == 2 && bits == 3) take = true;   // Release
+                if (state == 1) take = true;                 // 任一按下态
+            }
+            if (!take) continue;
+            if (_tl) { _tl->frame = _frame; _vm.setTimeline(_tl); }
+            _vm.run(act.code);
+            for (auto& t : _vm.traces) NSLog(@"[trace] %s", t.c_str());
+            _frame = _tl ? _tl->currentFrame() : _frame;
+            [self.slider setDoubleValue:_frame];
+            [self render];
+            fired = true;
+        }
+        if (fired) break;
+    }
+    if (!fired) [self render];
+}
+
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)a { return YES; }
 @end
 
