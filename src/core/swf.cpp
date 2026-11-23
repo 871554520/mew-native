@@ -365,6 +365,13 @@ bool parseMemory(const std::vector<uint8_t>& raw, Movie& mv, std::string* errp) 
             (void)sframeCount;
             mv.sprites[sp.id] = sp;
         }
+        else if (code == 12 && len > 0) {
+            if (curFrame < (int)mv.frames.size())
+                mv.frames[curFrame].actions.assign(rd.d + start, rd.d + start + len);
+        }
+        else if (code == 59 && len >= 2) {
+            mv.initActions.emplace_back(rd.d + start + 2, rd.d + start + len);
+        }
         else if (code == 43 && len > 0) {
             std::string s;
             for (size_t i = start; i < start + len; ++i) { if (!rd.d[i]) break; s.push_back((char)rd.d[i]); }
