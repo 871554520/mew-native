@@ -14,7 +14,9 @@ using BYTE   = uint8_t;
 using WORD   = uint16_t;
 using DWORD  = uint32_t;
 using QWORD  = uint64_t;
-using BOOL   = int;
+#ifndef OBJC_BOOL_DEFINED
+using BOOL   = int;   // ObjC++ 下 BOOL 已被 objc.h 定义成 bool，必须让位
+#endif
 using HANDLE = void*;
 using LPSTR  = char*;
 using LPCSTR = const char*;
