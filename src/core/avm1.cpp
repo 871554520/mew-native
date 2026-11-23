@@ -124,7 +124,7 @@ bool VM::exec(const uint8_t* c, size_t n, int depth) {
                 break;
             }
             case 0x1C: { Value name = pop(); auto it = globals_.find(name.toString()); push(it != globals_.end() ? it->second : Value::undefined()); break; }
-            case 0x1D: { Value val = pop(), name = pop(); globals_[name.toString()] = val; break; }
+            case 0x1D: { Value val = pop(), name = pop(); globals_[name.toString()] = val; push(val); break; }
             case 0x3C: { Value val = pop(), name = pop(); if (!locals_.empty()) locals_.back()[name.toString()] = val; else globals_[name.toString()] = val; break; }
             case 0x3A: case 0x3B: { Value name = pop(); globals_.erase(name.toString()); break; }
             case 0x9D: { // If
@@ -179,6 +179,7 @@ bool VM::exec(const uint8_t* c, size_t n, int depth) {
                 auto target = objV;
                 if (target.type != Value::Object_) target = Value::object();
                 target.obj->props[nameV.toString()] = val;
+                push(val);
                 break;
             }
             case 0x40: { // NewObject
