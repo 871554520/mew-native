@@ -55,6 +55,21 @@ struct Sprite;
 
 struct Sprite { int id=0; std::vector<Frame> frames; };
 
+struct ButtonRecord {
+    int characterId=0; int depth=0; uint8_t stateFlags=0; Matrix matrix;
+};
+
+struct ButtonAction {
+    uint16_t conditions=0;            // 低 8 位：1=over 2=up 3=down 4=hit
+    std::vector<uint8_t> code;
+};
+
+struct Button {
+    int id=0;
+    std::vector<ButtonRecord> records;
+    std::vector<ButtonAction> actions;
+};
+
 struct Movie {
     std::string name;
     Rect frameSize;
@@ -64,6 +79,7 @@ struct Movie {
     std::map<int,Bitmap> bitmaps;
     std::map<int,Shape> shapes;
     std::map<int,Sprite> sprites;
+    std::map<int,Button> buttons;
     std::vector<Frame> frames;
     std::vector<std::vector<uint8_t>> initActions;   // DoInitAction（按定义顺序）
     std::map<std::string,int> tagHistogram;
@@ -72,6 +88,11 @@ struct Movie {
 };
 
 bool parse(const std::string& path, Movie& out, std::string* err=nullptr);
+
+// 命中测试：点是否在按钮的可见记录范围内（应用 placement 与记录矩阵）
+bool hitTestButton(const Movie& mv, const Button& btn, double px, double py,
+                   double placeA=1, double placeB=0, double placeC=0, double placeD=1,
+                   double placeTx=0, double placeTy=0);
 bool parseMemory(const std::vector<uint8_t>& raw, Movie& out, std::string* err=nullptr);
 
 } // namespace swf
