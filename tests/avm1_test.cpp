@@ -98,6 +98,34 @@ int main() {
         check("DefineFunction/Call -> 42", ok && !vm.traces.empty() && vm.traces.back() == "42");
     }
 
+    {   // 对象成员 + 方法调用（按钮回调的写法）
+        Bytes fnBody;
+        pushStr(fnBody, "clicked"); fnBody.push_back(0x26);
+        Bytes code;
+        // 定义函数 cb（0 参数）
+        code.push_back(0x9B);
+        for (char ch : std::string("cb")) code.push_back((uint8_t)ch);
+        code.push_back(0);
+        u16(code, 0);
+        u16(code, (int)fnBody.size()); code.insert(code.end(), fnBody.begin(), fnBody.end());
+        code.push_back(0x17);
+        // obj = new Object(); obj.onRelease = cb;
+        pushStr(code, "Object"); code.push_back(0x40); u16(code, 0);
+        pushStr(code, "obj"); code.push_back(0x1D);              // 简化为全局 obj
+        pushStr(code, "obj"); code.push_back(0x1C);              // 取 obj
+        pushStr(code, "onRelease");
+        pushStr(code, "cb"); code.push_back(0x1C);               // 取函数值
+        code.push_back(0x4F);                                    // SetMember
+        code.push_back(0x17);                                    // 弹出 SetMember 的结果？SetMember 不压栈
+        // obj.onRelease()  -> CallMethod(obj, "onRelease", 0)
+        pushStr(code, "obj"); code.push_back(0x1C);
+        pushStr(code, "onRelease");
+        code.push_back(0x4C); u16(code, 0);
+        avm1::VM vm;
+        bool ok = vm.run(code); lastErr = vm.lastError();
+        check("SetMember + CallMethod", ok && !vm.traces.empty() && vm.traces.back() == "clicked");
+    }
+
     printf(fails == 0 ? "ALL PASS\n" : "FAILURES %d\n", fails);
     return fails == 0 ? 0 : 1;
 }
