@@ -12,23 +12,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 装 zlib 头
+      - name: 装 zlib
         run: sudo apt-get update -qq && sudo apt-get install -y -qq zlib1g-dev
 
-      - name: 编译解析层（无 Cocoa 依赖）
+      - name: 编译并扫描
         run: |
           cat > /tmp/scanmain.cpp <<'CPP'
           #include "swf.hpp"
           #include <cstdio>
           int main(int argc, char** argv) {
-              if (argc < 2) { printf("usage: scan file.swf\n"); return 2; }
+              if (argc < 2) return 2;
               swf::Movie mv; std::string err;
               if (!swf::parse(argv[1], mv, &err)) { printf("ERR %s\n", err.c_str()); return 1; }
-              size_t paths = 0, fills = 0;
-              for (auto& kv : mv.shapes) { paths += kv.second.paths.size(); fills += kv.second.fills.size(); }
-              printf("frames=%zu rate=%.2f shapes=%zu bitmaps=%zu tags=%zu paths=%zu fills=%zu bg=#%06X\n",
-                     mv.frames.size(), mv.frameRate, mv.shapes.size(), mv.bitmaps.size(),
-                     mv.tagHistogram.size(), paths, fills, mv.backgroundColor);
+              size_t paths = 0, fills = 0, grads = 0, spriteFrames = 0, clips = 0;
+              for (auto& kv : mv.shapes) {
+                  paths += kv.second.paths.size();
+                  fills += kv.second.fills.size();
+                  for (auto& f : kv.second.fills)
+                      if (f.kind == swf::FillStyle::LinearGradient || f.kind == swf::FillStyle::RadialGradient) grads++;
+              }
+              for (auto& kv : mv.sprites) spriteFrames += kv.second.frames.size();
+              for (auto& f : mv.frames) for (auto& op : f.ops) if (op.hasClip) clips++;
+              printf("frames=%zu rate=%.2f shapes=%zu bitmaps=%zu sprites=%zu spriteFrames=%zu\n",
+                     mv.frames.size(), mv.frameRate, mv.shapes.size(), mv.bitmaps.size(), mv.sprites.size(), spriteFrames);
+              printf("paths=%zu fills=%zu gradients=%zu clipMasks=%zu tags=%zu bg=#%06X\n",
+                     paths, fills, grads, clips, mv.tagHistogram.size(), mv.backgroundColor);
               return 0;
           }
           CPP
