@@ -102,8 +102,10 @@ static NSString* S(const std::string& s) { return [NSString stringWithUTF8String
     [s appendFormat:@"%s\n", name.c_str()];
     [s appendFormat:@"帧 %zu  帧率 %.2f  声明 %d  背景 #%06X\n",
         _movie.frames.size(), _movie.frameRate, _movie.frameCount, _movie.backgroundColor];
-    [s appendFormat:@"形状 %zu  位图 %zu  tag 种类 %zu\n",
-        _movie.shapes.size(), _movie.bitmaps.size(), _movie.tagHistogram.size()];
+    size_t sprites = _movie.sprites.size(), clip = 0;
+    for (auto& f : _movie.frames) for (auto& op : f.ops) if (op.hasClip) clip++;
+    [s appendFormat:@"形状 %zu  位图 %zu  精灵 %zu  遮罩 %zu  tag 种类 %zu\n",
+        _movie.shapes.size(), _movie.bitmaps.size(), sprites, clip, _movie.tagHistogram.size()];
     [self.info setStringValue:s];
 }
 
@@ -132,9 +134,15 @@ int main(int argc, const char* argv[]) {
         if (!swf::parse(argv[2], mv, &err)) { printf("ERR %s\n", err.c_str()); return 1; }
         printf("frames=%zu rate=%.2f shapes=%zu bitmaps=%zu tags=%zu\n",
                mv.frames.size(), mv.frameRate, mv.shapes.size(), mv.bitmaps.size(), mv.tagHistogram.size());
-        size_t paths=0, fills=0;
-        for (auto& kv : mv.shapes) { paths += kv.second.paths.size(); fills += kv.second.fills.size(); }
-        printf("paths=%zu fills=%zu bg=#%06X\n", paths, fills, mv.backgroundColor);
+        size_t paths=0, fills=0, grads=0, spriteFrames=0;
+        for (auto& kv : mv.shapes) {
+            paths += kv.second.paths.size();
+            for (auto& f : kv.second.fills) if (f.kind != swf::FillStyle::Solid && f.kind != swf::FillStyle::Bitmap) grads++;
+            fills += kv.second.fills.size();
+        }
+        for (auto& kv : mv.sprites) spriteFrames += kv.second.frames.size();
+        printf("paths=%zu fills=%zu gradients=%zu sprites=%zu spriteFrames=%zu bg=#%06X\n",
+               paths, fills, grads, mv.sprites.size(), spriteFrames, mv.backgroundColor);
         return 0;
     }
     @autoreleasepool {
