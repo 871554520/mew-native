@@ -29,6 +29,7 @@ std::string Value::toString() const {
         case Null: return "null";
         case Undefined: return "undefined";
         case Function: return "[function " + (fn ? fn->name : "") + "]";
+        case Object_: return "[object Object]";
     }
     return "";
 }
@@ -55,6 +56,17 @@ namespace {
 inline uint16_t rd16(const uint8_t* p) { return (uint16_t)(p[0] | (p[1] << 8)); }
 inline uint32_t rd32(const uint8_t* p) { return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24); }
 inline double rdDouble(const uint8_t* p) { double d; __builtin_memcpy(&d, p, 8); return d; }
+}
+
+Value VM::callFunction(const Value& target, const std::vector<Value>& argv, int depth) {
+    if (target.type != Value::Function || !target.fn) return Value::undefined();
+    locals_.push_back({});
+    for (size_t i = 0; i < target.fn->params.size() && i < argv.size(); ++i)
+        locals_.back()[target.fn->params[i]] = argv[i];
+    bool ok = exec(target.fn->code.data(), target.fn->code.size(), depth + 1);
+    locals_.pop_back();
+    if (!ok) error_ = "函数执行失败";
+    return Value::undefined();
 }
 
 bool VM::run(const std::vector<uint8_t>& code) {
@@ -151,6 +163,76 @@ bool VM::exec(const uint8_t* c, size_t n, int depth) {
                 push(fv);
                 break;
             }
+            case 0x4E: { // GetMember
+                Value nameV = pop(), objV = pop();
+                if (objV.type == Value::Object_ && objV.obj) {
+                    auto it = objV.obj->props.find(nameV.toString());
+                    push(it != objV.obj->props.end() ? it->second : Value::undefined());
+                } else if (objV.type == Value::Undefined) {
+                    auto it = globals_.find(nameV.toString());
+                    push(it != globals_.end() ? it->second : Value::undefined());
+                } else push(Value::undefined());
+                break;
+            }
+            case 0x4F: { // SetMember(pop value, name, obj)
+                Value val = pop(), nameV = pop(), objV = pop();
+                auto target = objV;
+                if (target.type != Value::Object_) target = Value::object();
+                target.obj->props[nameV.toString()] = val;
+                break;
+            }
+            case 0x40: { // NewObject
+                Value nameV = pop();
+                if (pc + 2 > n) return false;
+                int argc = rd16(c + pc); pc += 2;
+                for (int i = 0; i < argc * 2; ++i) pop();
+                (void)nameV;
+                push(Value::object());
+                break;
+            }
+            case 0x4C: { // CallMethod
+                Value methodV = pop(), objV = pop();
+                if (pc + 2 > n) return false;
+                int argc = rd16(c + pc); pc += 2;
+                std::vector<Value> argv(argc);
+                for (int i = argc - 1; i >= 0; --i) argv[i] = pop();
+                Value fnV = Value::undefined();
+                if (objV.type == Value::Object_ && objV.obj) {
+                    auto it = objV.obj->props.find(methodV.toString());
+                    if (it != objV.obj->props.end()) fnV = it->second;
+                }
+                if (fnV.type != Value::Function) {
+                    auto it = globals_.find(methodV.toString());
+                    if (it != globals_.end()) fnV = it->second;
+                }
+                callFunction(fnV, argv, depth);
+                break;
+            }
+            case 0x8E: { // DefineFunction2
+                auto readStr = [&](void) -> std::string {
+                    std::string out;
+                    while (pc < n && c[pc] != 0) out.push_back((char)c[pc++]);
+                    if (pc < n) pc++;
+                    return out;
+                };
+                auto fn = std::make_shared<Value::Func>();
+                fn->name = readStr();
+                if (pc + 2 > n) return false;
+                int nparams = rd16(c + pc); pc += 2;
+                uint8_t regCount = pc < n ? c[pc++] : 0;
+                for (int i = 0; i < 8; ++i) { if (pc >= n) break; uint8_t flags = c[pc++]; (void)flags; }
+                (void)regCount;
+                for (int i = 0; i < nparams; ++i) fn->params.push_back(readStr());
+                if (pc + 2 > n) return false;
+                int codelen = rd16(c + pc); pc += 2;
+                if (pc + codelen > n) return false;
+                fn->code.assign(c + pc, c + pc + codelen);
+                pc += codelen;
+                Value fv; fv.type = Value::Function; fv.fn = fn;
+                globals_[fn->name] = fv;
+                push(fv);
+                break;
+            }
             case 0x3D: { // CallFunction
                 Value nameV = pop();
                 if (pc + 2 > n) return false;
@@ -162,14 +244,8 @@ bool VM::exec(const uint8_t* c, size_t n, int depth) {
                     auto it = globals_.find(nameV.toString());
                     if (it != globals_.end()) target = it->second;
                 }
-                if (target.type == Value::Function && target.fn) {
-                    locals_.push_back({});
-                    for (size_t i = 0; i < target.fn->params.size() && i < argv.size(); ++i)
-                        locals_.back()[target.fn->params[i]] = argv[i];
-                    bool ok = exec(target.fn->code.data(), target.fn->code.size(), depth + 1);
-                    locals_.pop_back();
-                    if (!ok) return false;
-                }
+                Value ret = callFunction(target, argv, depth);
+                (void)ret;
                 break;
             }
             case 0x3E: return true; // Return
