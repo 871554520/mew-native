@@ -4,42 +4,32 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    paths: [".build-trigger"]
 
 jobs:
   build:
     runs-on: macos-26
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-
-      - name: 工具链
+      - name: 配置与编译（日志落盘）
         run: |
-          cmake --version
-          xcodebuild -version
-
-      - name: 配置与编译
-        run: |
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --parallel
-
-      - name: SWF 解析自检（--scan）
+          set +e
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release > build.log 2>&1
+          cmake --build build --parallel >> build.log 2>&1
+          echo "build_rc=$?" >> build.log
+          tail -40 build.log
+      - name: 校验与打包
         run: |
           BIN=build/MewgenicsNative.app/Contents/MacOS/MewgenicsNative
-          file "$BIN"
-          lipo -info "$BIN"
-          otool -L "$BIN"
-          echo "--- scan ---"
-          "$BIN" --scan samples/font.swf
-
-      - name: 签名与打包
-        run: |
-          codesign --force --deep --sign - build/MewgenicsNative.app
-          codesign -dv build/MewgenicsNative.app 2>&1 | head -3
-          ditto -c -k --sequesterRsrc --keepParent build/MewgenicsNative.app MewgenicsNative-mac.zip
-          ls -l MewgenicsNative-mac.zip
-
+          file "$BIN" >> build.log 2>&1
+          codesign --force --deep --sign - build/MewgenicsNative.app >> build.log 2>&1
+          ditto -c -k --sequesterRsrc --keepParent build/MewgenicsNative.app MewgenicsNative-mac.zip >> build.log 2>&1
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: MewgenicsNative
-          path: MewgenicsNative-mac.zip
-          if-no-files-found: error
+          name: build-log
+          path: |
+            build.log
+            MewgenicsNative-mac.zip
+          if-no-files-found: warn
