@@ -103,8 +103,21 @@ StyleArrays readStyles(Reader& rd, int shapeVersion, bool withBitmapMatrices) {
             fs.matrix = readMatrix(br);
             rd.skip((br.bit + 7) / 8);
             sa.hasBitmap = true;
+        } else if (t == 0x10 || t == 0x12 || t == 0x13) {
+            fs.kind = (t == 0x10) ? FillStyle::LinearGradient : FillStyle::RadialGradient;
+            BitReader br(rd.d + rd.p, rd.n - rd.p);
+            fs.matrix = readMatrix(br);
+            rd.skip((br.bit + 7) / 8);
+            uint8_t nstops = rd.u8();
+            for (int k = 0; k < nstops; ++k) {
+                GradientStop gs;
+                gs.ratio = rd.u8();
+                gs.r = rd.u8(); gs.g = rd.u8(); gs.b = rd.u8();
+                gs.a = (shapeVersion >= 3) ? rd.u8() : 255;
+                fs.stops.push_back(gs);
+            }
+            if (t == 0x13) rd.skip(4); // focal point
         } else {
-            // 渐变等暂不支持，尽量跳过
             return sa;
         }
         sa.fills.push_back(fs);
@@ -299,7 +312,7 @@ bool parseMemory(const std::vector<uint8_t>& raw, Movie& mv, std::string* errp) 
             }
             if (flags & 0x10) p += 2;
             if (flags & 0x20) { while (p < start + len && rd.d[p]) p++; p++; }
-            if (flags & 0x40) p += 2;
+            if (flags & 0x40) { pl.clipDepth = rd.d[p] | (rd.d[p+1]<<8); pl.hasClip = true; p += 2; }
             mv.frames[curFrame].ops.push_back(pl);
         }
         else if (code == 28 && len >= 2) {
@@ -310,6 +323,47 @@ bool parseMemory(const std::vector<uint8_t>& raw, Movie& mv, std::string* errp) 
         else if (code == 1) {
             curFrame++;
             mv.frames.emplace_back();
+        }
+        else if (code == 39 && len >= 4) {
+            Sprite sp;
+            sp.id = rd.d[start] | (rd.d[start+1]<<8);
+            int sframeCount = rd.d[start+2] | (rd.d[start+3]<<8);
+            size_t p = start + 4, endTag = start + len;
+            sp.frames.emplace_back();
+            while (p + 2 <= endTag) {
+                uint16_t sth = rd.d[p] | (rd.d[p+1]<<8); p += 2;
+                int scode = sth >> 6;
+                size_t slen = sth & 0x3f;
+                if (slen == 0x3f) { if (p + 4 > endTag) break;
+                    slen = rd.d[p] | (rd.d[p+1]<<8) | (rd.d[p+2]<<16) | ((size_t)rd.d[p+3]<<24); p += 4; }
+                if (p + slen > endTag) break;
+                if (scode == 26 && slen >= 5) {
+                    uint8_t fl = rd.d[p];
+                    size_t q = p + 1;
+                    int dep = rd.d[q] | (rd.d[q+1]<<8); q += 2;
+                    Placement pl; pl.depth = dep;
+                    if (fl & 0x02) { pl.characterId = rd.d[q] | (rd.d[q+1]<<8); q += 2; }
+                    if (fl & 0x04) {
+                        Reader mr(rd.d + q, p + slen - q); BitReader mbr(mr.d, mr.n);
+                        pl.matrix = readMatrix(mbr); q += (mbr.bit + 7) / 8;
+                    }
+                    if (fl & 0x08) { Reader cr(rd.d + q, p + slen - q); BitReader cbr(cr.d, cr.n); skipCxform(cbr); q += (cbr.bit + 7) / 8; }
+                    if (fl & 0x10) q += 2;
+                    if (fl & 0x20) { while (q < p + slen && rd.d[q]) q++; q++; }
+                    if (fl & 0x40) { pl.clipDepth = rd.d[q] | (rd.d[q+1]<<8); pl.hasClip = true; q += 2; }
+                    sp.frames.back().ops.push_back(pl);
+                } else if (scode == 28 && slen >= 2) {
+                    Placement pl; pl.remove = true;
+                    pl.depth = rd.d[p] | (rd.d[p+1]<<8);
+                    sp.frames.back().ops.push_back(pl);
+                } else if (scode == 1) {
+                    sp.frames.emplace_back();
+                }
+                p += slen;
+            }
+            if (!sp.frames.empty() && sp.frames.back().ops.empty()) sp.frames.pop_back();
+            (void)sframeCount;
+            mv.sprites[sp.id] = sp;
         }
         else if (code == 43 && len > 0) {
             std::string s;
