@@ -1,0 +1,44 @@
+name: Build native macOS app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 工具链
+        run: |
+          cmake --version
+          xcodebuild -version
+          clang --version | head -2
+
+      - name: 配置与编译
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
+
+      - name: 校验架构与依赖
+        run: |
+          BIN=build/MewgenicsNative.app/Contents/MacOS/MewgenicsNative
+          file "$BIN"
+          lipo -info "$BIN"
+          otool -L "$BIN"
+          codesign --force --deep --sign - build/MewgenicsNative.app
+          codesign -dv build/MewgenicsNative.app 2>&1 | head -5
+
+      - name: 打包
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent build/MewgenicsNative.app MewgenicsNative-mac.zip
+          ls -l MewgenicsNative-mac.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MewgenicsNative
+          path: MewgenicsNative-mac.zip
+          if-no-files-found: error
