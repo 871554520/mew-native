@@ -46,7 +46,8 @@ int main() {
         // loop:
         size_t loopStart = code.size();
         pushStr(code, "i"); code.push_back(0x1C);           // get i
-        pushInt(code, 3); code.push_back(0x99); u16(code, 0); // 占位：后面改成跳出
+        pushInt(code, 3); code.push_back(0x48);             // i < 3
+        code.push_back(0x9D); u16(code, 0);                 // If -> 跳出
         size_t jumpPos = code.size() - 2;
         // i = i + 1
         pushStr(code, "i"); pushStr(code, "i"); code.push_back(0x1C); pushInt(code, 1); code.push_back(0x0A); code.push_back(0x1D);
@@ -80,10 +81,12 @@ int main() {
         Bytes body;
         pushStr(body, "x"); body.push_back(0x1C); pushInt(body, 2); body.push_back(0x0C); // x*2
         Bytes code;
-        pushStr(code, "dbl");
-        code.push_back(0x9B); u16(code, 0);          // 0 个参数
+        code.push_back(0x9B);
+        for (char ch : std::string("dbl")) code.push_back((uint8_t)ch);
+        code.push_back(0);
+        u16(code, 0);                                // 0 个参数
         u16(code, (int)body.size()); code.insert(code.end(), body.begin(), body.end());
-        code.push_back(0x17);                        // 弹出函数体
+        code.push_back(0x17);                        // 弹出函数值
         pushStr(code, "dbl"); u16(code, 0); code.push_back(0x3D); // CallFunction "dbl"
         avm1::VM vm; vm.setGlobal("x", avm1::Value::number(21));
         bool ok = vm.run(code);
