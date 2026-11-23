@@ -1,50 +1,67 @@
-// L2 视图层：原生 AppKit 窗口，读取 resources.gpak 并预览贴图
+// L2 视图：AppKit 窗口 —— 从 resources.gpak 里挑 SWF，逐帧渲染
 #import <Cocoa/Cocoa.h>
-#include <ImageIO/ImageIO.h>
-#include <CoreServices/CoreServices.h>
 #include <string>
 #include <vector>
-#include <map>
+#include <algorithm>
 #include "gpak.hpp"
-#include "win32_macos_shim.hpp"
+#include "swf.hpp"
+#include "swfrender.hpp"
 
-static NSString* nsstr(const std::string& s) {
-    return [NSString stringWithUTF8String:s.c_str()] ?: @"?";
-}
+static NSString* S(const std::string& s) { return [NSString stringWithUTF8String:s.c_str()] ?: @"?"; }
 
-@interface MewDelegate : NSObject <NSApplicationDelegate>
-@property (strong) NSWindow* window;
+@interface Viewer : NSObject <NSApplicationDelegate>
+@property (strong) NSWindow* win;
 @property (strong) NSTextField* info;
-@property (strong) NSImageView* preview;
+@property (strong) NSImageView* view;
+@property (strong) NSSlider* slider;
+@property (strong) NSPopUpButton* picker;
+@property (strong) NSTextField* frameLabel;
 @end
 
-@implementation MewDelegate
+@implementation Viewer {
+    mew::Gpak _pack;
+    std::vector<std::string> _swfNames;
+    swf::Movie _movie;
+    int _frame;
+}
 
-- (void)applicationDidFinishLaunching:(NSNotification*)note {
-    NSRect frame = NSMakeRect(0, 0, 980, 640);
-    self.window = [[NSWindow alloc] initWithContentRect:frame
+- (void)applicationDidFinishLaunching:(NSNotification*)n {
+    NSRect f = NSMakeRect(0,0,1080,720);
+    self.win = [[NSWindow alloc] initWithContentRect:f
         styleMask:(NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable)
         backing:NSBackingStoreBuffered defer:NO];
-    [self.window setTitle:@"Mewgenics Native (macOS arm64)"];
-    [self.window center];
+    [self.win setTitle:@"Mewgenics SWF Runtime (native arm64)"];
+    [self.win center];
+    NSView* c = self.win.contentView;
 
-    NSView* content = self.window.contentView;
-    self.info = [[NSTextField alloc] initWithFrame:NSMakeRect(20, 470, 940, 150)];
+    self.picker = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(20, 668, 520, 28) pullsDown:NO];
+    [self.picker setTarget:self]; [self.picker setAction:@selector(pickChanged:)];
+    [c addSubview:self.picker];
+
+    self.slider = [[NSSlider alloc] initWithFrame:NSMakeRect(560, 668, 380, 28)];
+    [self.slider setTarget:self]; [self.slider setAction:@selector(frameChanged:)];
+    [self.slider setMinValue:0]; [self.slider setMaxValue:1];
+    [c addSubview:self.slider];
+
+    self.frameLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(952, 670, 110, 22)];
+    [self.frameLabel setEditable:NO]; [self.frameLabel setBezeled:NO]; [self.frameLabel setDrawsBackground:NO];
+    [c addSubview:self.frameLabel];
+
+    self.view = [[NSImageView alloc] initWithFrame:NSMakeRect(20, 150, 1040, 500)];
+    [self.view setImageScaling:NSImageScaleProportionallyUpOrDown];
+    [c addSubview:self.view];
+
+    self.info = [[NSTextField alloc] initWithFrame:NSMakeRect(20, 20, 1040, 120)];
     [self.info setEditable:NO]; [self.info setBezeled:NO]; [self.info setDrawsBackground:NO];
-    [self.info setFont:[NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular]];
-    [content addSubview:self.info];
-
-    self.preview = [[NSImageView alloc] initWithFrame:NSMakeRect(20, 20, 940, 440)];
-    [self.preview setImageScaling:NSImageScaleProportionallyUpOrDown];
-    [content addSubview:self.preview];
+    [self.info setFont:[NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular]];
+    [c addSubview:self.info];
 
     [self loadPack];
-    [self.window makeKeyAndOrderFront:nil];
+    [self.win makeKeyAndOrderFront:nil];
     [NSApp activateIgnoringOtherApps:YES];
 }
 
 - (void)loadPack {
-    // 游戏目录：app 同级的 Mewgenics/，或 ~/Documents/Mewgenics/
     std::vector<std::string> cands;
     NSString* exeDir = [[[NSBundle mainBundle] bundlePath] stringByDeletingLastPathComponent];
     cands.push_back(std::string([exeDir UTF8String]) + "/Mewgenics/resources.gpak");
@@ -52,52 +69,79 @@ static NSString* nsstr(const std::string& s) {
     if (home) cands.push_back(std::string(home) + "/Documents/Mewgenics/resources.gpak");
     cands.push_back("Mewgenics/resources.gpak");
     cands.push_back("resources.gpak");
-
-    mew::Gpak pack;
     std::string used;
-    for (auto& c : cands) if (pack.open(c)) { used = c; break; }
+    for (auto& p : cands) if (_pack.open(p)) { used = p; break; }
     if (used.empty()) {
-        [self.info setStringValue:@"没找到 resources.gpak\n把它放到 ~/Documents/Mewgenics/resources.gpak"];
+        [self.info setStringValue:@"没找到 resources.gpak\n放到 ~/Documents/Mewgenics/resources.gpak 后重启"];
         return;
     }
-
-    std::map<std::string,int> byExt;
-    for (auto& e : pack.entries()) {
-        auto dot = e.name.find_last_of('.');
-        std::string ext = dot == std::string::npos ? "(none)" : e.name.substr(dot);
-        byExt[ext]++;
-    }
-    std::string report = "容器：" + used + "\n";
-    report += "条目：" + std::to_string(pack.entries().size()) + "   索引结束于偏移 " + std::to_string(pack.indexEnd()) + "\n";
-    report += "按类型：";
-    for (auto& kv : byExt) report += kv.first + "=" + std::to_string(kv.second) + "  ";
-    report += "\n构建：arm64 Mach-O / AppKit 原生窗口 / gpak 直读（无 Wine）";
-
-    // 预览一张贴图
-    if (auto* e = pack.find("textures/eyestrip1.png")) {
-        std::vector<uint8_t> data;
-        if (pack.read(*e, data)) {
-            NSData* nsd = [NSData dataWithBytes:data.data() length:data.size()];
-            CGImageSourceRef src = CGImageSourceCreateWithData((CFDataRef)nsd, NULL);
-            if (src) {
-                CGImageRef img = CGImageSourceCreateImageAtIndex(src, 0, NULL);
-                if (img) { [self.preview setImage:[[NSImage alloc] initWithCGImage:img size:NSZeroSize]]; CGImageRelease(img); }
-                CFRelease(src);
-            }
-        }
-    }
-    [self.info setStringValue:nsstr(report)];
+    for (auto& e : _pack.entries())
+        if (e.name.rfind("swfs/", 0) == 0 && e.size > 4096) _swfNames.push_back(e.name);
+    std::sort(_swfNames.begin(), _swfNames.end());
+    for (auto& n : _swfNames) [self.picker addItemWithTitle:S(n)];
+    [self.info setStringValue:[NSString stringWithFormat:@"容器 %s  条目 %zu  SWF %zu",
+                               used.c_str(), _pack.entries().size(), _swfNames.size()]];
+    if (!_swfNames.empty()) [self loadSwf:_swfNames[0]];
 }
 
-- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)sender { return YES; }
+- (void)loadSwf:(const std::string&)name {
+    const mew::GpakEntry* e = _pack.find(name);
+    if (!e) return;
+    std::vector<uint8_t> data;
+    if (!_pack.read(*e, data)) return;
+    std::string err;
+    if (!swf::parseMemory(data, _movie, &err)) {
+        [self.info setStringValue:[NSString stringWithFormat:@"解析失败：%s", err.c_str()]];
+        return;
+    }
+    _frame = 0;
+    [self.slider setMaxValue:std::max(1, (int)_movie.frames.size() - 1)];
+    [self.slider setDoubleValue:0];
+    [self render];
+    NSMutableString* s = [NSMutableString string];
+    [s appendFormat:@"%s\n", name.c_str()];
+    [s appendFormat:@"帧 %zu  帧率 %.2f  声明 %d  背景 #%06X\n",
+        _movie.frames.size(), _movie.frameRate, _movie.frameCount, _movie.backgroundColor];
+    [s appendFormat:@"形状 %zu  位图 %zu  tag 种类 %zu\n",
+        _movie.shapes.size(), _movie.bitmaps.size(), _movie.tagHistogram.size()];
+    [self.info setStringValue:s];
+}
+
+- (void)render {
+    CGImageRef img = mewrender::renderFrame(_movie, _frame, 1.0);
+    if (!img) return;
+    [self.view setImage:[[NSImage alloc] initWithCGImage:img size:NSZeroSize]];
+    CGImageRelease(img);
+    [self.frameLabel setStringValue:[NSString stringWithFormat:@"frame %d / %zu", _frame, _movie.frames.size()]];
+}
+
+- (void)pickChanged:(id)sender {
+    NSInteger i = [self.picker indexOfSelectedItem];
+    if (i >= 0 && i < (NSInteger)_swfNames.size()) [self loadSwf:_swfNames[i]];
+}
+- (void)frameChanged:(id)sender {
+    _frame = (int)[self.slider doubleValue];
+    [self render];
+}
+- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)a { return YES; }
 @end
 
 int main(int argc, const char* argv[]) {
+    if (argc >= 3 && std::string(argv[1]) == "--scan") {
+        swf::Movie mv; std::string err;
+        if (!swf::parse(argv[2], mv, &err)) { printf("ERR %s\n", err.c_str()); return 1; }
+        printf("frames=%zu rate=%.2f shapes=%zu bitmaps=%zu tags=%zu\n",
+               mv.frames.size(), mv.frameRate, mv.shapes.size(), mv.bitmaps.size(), mv.tagHistogram.size());
+        size_t paths=0, fills=0;
+        for (auto& kv : mv.shapes) { paths += kv.second.paths.size(); fills += kv.second.fills.size(); }
+        printf("paths=%zu fills=%zu bg=#%06X\n", paths, fills, mv.backgroundColor);
+        return 0;
+    }
     @autoreleasepool {
         NSApplication* app = [NSApplication sharedApplication];
         [app setActivationPolicy:NSApplicationActivationPolicyRegular];
-        MewDelegate* del = [[MewDelegate alloc] init];
-        [app setDelegate:del];
+        Viewer* d = [[Viewer alloc] init];
+        [app setDelegate:d];
         [app run];
     }
     return 0;
