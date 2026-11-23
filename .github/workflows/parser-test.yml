@@ -1,0 +1,36 @@
+name: Parser test (linux)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 装 zlib 头
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zlib1g-dev
+
+      - name: 编译解析层（无 Cocoa 依赖）
+        run: |
+          cat > /tmp/scanmain.cpp <<'CPP'
+          #include "swf.hpp"
+          #include <cstdio>
+          int main(int argc, char** argv) {
+              if (argc < 2) { printf("usage: scan file.swf\n"); return 2; }
+              swf::Movie mv; std::string err;
+              if (!swf::parse(argv[1], mv, &err)) { printf("ERR %s\n", err.c_str()); return 1; }
+              size_t paths = 0, fills = 0;
+              for (auto& kv : mv.shapes) { paths += kv.second.paths.size(); fills += kv.second.fills.size(); }
+              printf("frames=%zu rate=%.2f shapes=%zu bitmaps=%zu tags=%zu paths=%zu fills=%zu bg=#%06X\n",
+                     mv.frames.size(), mv.frameRate, mv.shapes.size(), mv.bitmaps.size(),
+                     mv.tagHistogram.size(), paths, fills, mv.backgroundColor);
+              return 0;
+          }
+          CPP
+          g++ -std=c++17 -O2 -Isrc/core -Isrc/shim src/core/swf.cpp src/core/gpak.cpp /tmp/scanmain.cpp -lz -o /tmp/scan
+          /tmp/scan samples/font.swf
